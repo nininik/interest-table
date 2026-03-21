@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>절세 계좌 시뮬레이터</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --us: #ef4444; --isa: #10b981; --irp: #8b5cf6; --bg: #f8fafc; }
+        body { font-family: 'Pretendard', sans-serif; background-color: var(--bg); padding: 20px; color: #1e293b; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        .header { text-align: center; margin-bottom: 30px; }
+        .input-section { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; padding: 20px; background: #f1f5f9; border-radius: 15px; }
+        .input-group { display: flex; flex-direction: column; }
+        label { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #475569; }
+        input { padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; }
+        
+        .btn-calc { grid-column: 1 / -1; padding: 15px; background: #4f46e5; color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-calc:hover { background: #4338ca; }
+
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .res-card { padding: 20px; border-radius: 16px; border: 1px solid #e2e8f0; text-align: center; background: #fff; }
+        .res-card h4 { margin: 0; font-size: 14px; color: #64748b; }
+        .res-card .amount { font-size: 22px; font-weight: 800; margin: 10px 0; }
+        .res-card .tax-info { font-size: 12px; color: #94a3b8; line-height: 1.4; }
+
+        .chart-container { height: 380px; margin-top: 20px; }
+        .info-box { background: #f5f3ff; border-left: 4px solid #8b5cf6; padding: 15px; margin-top: 20px; font-size: 13px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>💰 미국 직구 vs ISA vs IRP 비교</h2>
+        <p>복잡한 설정 없이 핵심 로직으로만 비교합니다.</p>
+    </div>
+    
+    <div class="input-section">
+        <div class="input-group">
+            <label>초기 투자금 (원)</label>
+            <input type="number" id="principal" value="10000000">
+        </div>
+        <div class="input-group">
+            <label>매월 추가 적립 (원)</label>
+            <input type="number" id="monthly" value="500000">
+        </div>
+        <div class="input-group">
+            <label>연 수익률 (%)</label>
+            <input type="number" id="rate" step="0.1" value="10">
+        </div>
+        <div class="input-group">
+            <label>투자 기간 (년)</label>
+            <input type="number" id="years" value="20">
+        </div>
+        <button class="btn-calc" onclick="runCompare()">시뮬레이션 시작</button>
+    </div>
+
+    <div class="result-grid">
+        <div class="res-card" style="border-top: 5px solid var(--us);">
+            <h4>미국 직구 (QQQ)</h4>
+            <div class="amount" id="resUS" style="color: var(--us);">0원</div>
+            <div class="tax-info" id="taxUS">양도세 22% 차감</div>
+        </div>
+        <div class="res-card" style="border-top: 5px solid var(--isa);">
+            <h4>ISA 계좌</h4>
+            <div class="amount" id="resISA" style="color: var(--isa);">0원</div>
+            <div class="tax-info" id="taxISA">수익 9.9% 절세</div>
+        </div>
+        <div class="res-card" style="border-top: 5px solid var(--irp);">
+            <h4>퇴직연금 IRP</h4>
+            <div class="amount" id="resIRP" style="color: var(--irp);">0원</div>
+            <div class="tax-info" id="taxIRP">세액공제 + 저율과세</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="compChart"></canvas>
+    </div>
+
+    <div class="info-box">
+        <b>📝 시뮬레이션 설정값 안내:</b><br>
+        1. <b>IRP 세액공제:</b> 연 납입액 중 900만 원까지 <b>13.2%</b> 환급(연 1,188,000원)을 가정하여 매년 재투자합니다.<br>
+        2. <b>IRP 연금세:</b> 만기 수령 시 전체 금액에 대해 <b>5.5%</b> 연금소득세를 차감한 실 수령액입니다.<br>
+        3. <b>ISA:</b> 수익 200만 원 비과세 혜택을 반영했습니다. (200만원 비과세 + 9.9% 분리과세) 
+    </div>
+</div>
+
+<script>
+    let chart = null;
+
+    function runCompare() {
+        const P = parseFloat(document.getElementById('principal').value) || 0;
+        const M = parseFloat(document.getElementById('monthly').value) || 0;
+        const r = parseFloat(document.getElementById('rate').value) / 100 || 0;
+        const years = parseInt(document.getElementById('years').value) || 0;
+        
+        const creditRate = 0.132; // 연봉 5,500만 원 초과 기본값 고정
+        const mRate = r / 12;
+        
+        let labels = [];
+        let rawGrowth = [];
+        let balRaw = P, balIRP = P;
+        let cumInvest = P;
+
+        labels.push("시작");
+        rawGrowth.push(P);
+
+        for (let y = 1; y <= years; y++) {
+            for (let m = 1; m <= 12; m++) {
+                balRaw = (balRaw + M) * (1 + mRate);
+                balIRP = (balIRP + M) * (1 + mRate);
+                cumInvest += M;
+            }
+            // IRP 세액공제 환급금 재투자 (연 900만 한도)
+            let creditAmount = Math.min(M * 12, 9000000) * creditRate;
+            balIRP += creditAmount;
+
+            labels.push(y + "년");
+            rawGrowth.push(Math.floor(balRaw));
+        }
+
+        const totalProfit = balRaw - cumInvest;
+
+        // 미국 직구 (22%)
+        const usTax = totalProfit > 2500000 ? (totalProfit - 2500000) * 0.22 : 0;
+        const finalUS = balRaw - usTax;
+
+        // ISA (9.9%)
+        const isaTax = totalProfit > 2000000 ? (totalProfit - 2000000) * 0.099 : 0;
+        const finalISA = balRaw - isaTax;
+
+        // IRP (연금세 5.5%)
+        const finalIRP = balIRP * (1 - 0.055);
+
+        document.getElementById('resUS').innerText = Math.floor(finalUS).toLocaleString() + "원";
+        document.getElementById('resISA').innerText = Math.floor(finalISA).toLocaleString() + "원";
+        document.getElementById('resIRP').innerText = Math.floor(finalIRP).toLocaleString() + "원";
+        
+        document.getElementById('taxUS').innerText = `세금: -${Math.floor(usTax).toLocaleString()}원`;
+        document.getElementById('taxISA').innerText = `세금: -${Math.floor(isaTax).toLocaleString()}원`;
+        document.getElementById('taxIRP').innerText = `연금세 차감 후 실 수령액`;
+
+        renderChart(labels, rawGrowth);
+    }
+
+    function renderChart(labels, data) {
+        const ctx = document.getElementById('compChart').getContext('2d');
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '자산 성장 (세전 복리 추이)',
+                    data: data,
+                    borderColor: '#4f46e5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { ticks: { callback: v => (v/100000000).toFixed(1) + '억' } } }
+            }
+        });
+    }
+    window.onload = runCompare;
+</script>
+</body>
+</html>
