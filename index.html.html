@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>공영수영장 찾기 🏊</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+    <script type="text/javascript" src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=tg6az681o1&submodules=geocoder"></script>
+
+    <style>
+        :root { --blue: #1255CC; --bg: #F5F7FA; }
+        body { margin: 0; font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: #333; }
+        header { background: var(--blue); color: white; padding: 30px 20px; text-align: center; }
+        #map { width: 100%; height: 450px; background: #e0e0e0; border-bottom: 1px solid #ccc; }
+        .search-container { padding: 20px; display: flex; justify-content: center; gap: 10px; background: white; }
+        input { padding: 12px; width: 300px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        button { padding: 12px 24px; background: var(--blue); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0e44a3; }
+        .info-window { padding: 15px; min-width: 220px; line-height: 1.6; }
+        .info-window h4 { margin: 0 0 8px 0; color: var(--blue); font-size: 18px; }
+        #status { text-align: center; padding: 10px; color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🏊 전국 수영장 찾기</h1>
+    <p>공공데이터 기반 수영장 위치 정보 서비스</p>
+</header>
+
+<div class="search-container">
+    <input type="text" id="searchInput" placeholder="동네나 수영장 이름을 입력하세요" onkeypress="if(event.keyCode==13) doSearch()">
+    <button onclick="doSearch()">검색하기</button>
+</div>
+
+<div id="status">지도를 불러오는 중입니다...</div>
+<div id="map"></div>
+
+<script>
+    let map;
+    const infoWindow = new naver.maps.InfoWindow();
+
+    // 2. 지도 초기화
+    function initMap() {
+        try {
+            map = new naver.maps.Map('map', {
+                center: new naver.maps.LatLng(37.5665, 126.9780),
+                zoom: 11,
+                zoomControl: true
+            });
+            document.getElementById('status').innerText = "지도가 성공적으로 로드되었습니다.";
+        } catch (e) {
+            document.getElementById('status').innerHTML = "<b style='color:red'>지도 로드 실패:</b> 네이버 콘솔 설정을 확인하세요.";
+        }
+    }
+
+    // 페이지 로드 후 즉시 실행
+    window.onload = initMap;
+
+    // 3. 검색 및 마커 표시
+    function doSearch() {
+        const keyword = document.getElementById('searchInput').value.trim();
+        if (!keyword) return alert("검색어를 입력해 주세요.");
+
+        document.getElementById('status').innerText = `'${keyword}' 검색 중...`;
+
+        // JSON 데이터 불러오기
+        fetch('tableConvert.com_6369xb.json')
+            .then(res => res.json())
+            .then(data => {
+                const results = data.filter(item => 
+                    (item.주소 && item.주소.includes(keyword)) || 
+                    (item["시설명(이름)"] && item["시설명(이름)"].includes(keyword)) ||
+                    (item.시군구 && item.시군구.includes(keyword))
+                );
+
+                if (results.length === 0) {
+                    document.getElementById('status').innerText = "검색 결과가 없습니다.";
+                    return;
+                }
+
+                document.getElementById('status').innerText = `${results.length}개의 수영장을 찾았습니다.`;
+                renderMarkers(results);
+            })
+            .catch(err => {
+                console.error(err);
+                alert("데이터를 불러오는 데 실패했습니다.");
+            });
+    }
+
+    // 4. 마커 그리기 로직
+    function renderMarkers(items) {
+        // 기존 마커 제거 로직은 생략(새로고침 기준)
+        items.forEach(item => {
+            naver.maps.Service.geocode({ query: item.주소 }, function(status, response) {
+                if (status !== naver.maps.Service.Status.OK) return;
+
+                const result = response.v2.addresses[0];
+                const coords = new naver.maps.LatLng(result.y, result.x);
+
+                const marker = new naver.maps.Marker({
+                    position: coords,
+                    map: map,
+                    animation: naver.maps.Animation.DROP
+                });
+
+                naver.maps.Event.addListener(marker, "click", function() {
+                    const contentStr = `
+                        <div class="info-window">
+                            <h4>${item["시설명(이름)"]}</h4>
+                            <p><b>주소:</b> ${item.주소}<br>
+                            <b>연락처:</b> ${item["운영조직(연락처)"] || '정보 없음'}</p>
+                        </div>`;
+                    infoWindow.setContent(contentStr);
+                    infoWindow.open(map, marker);
+                });
+                
+                // 검색 결과 첫 번째 위치로 지도 이동
+                map.setCenter(coords);
+            });
+        });
+    }
+</script>
+
+</body>
+</html>
